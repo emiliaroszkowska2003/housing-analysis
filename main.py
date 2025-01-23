@@ -2,12 +2,13 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 import joblib
+import shap
 
 file_path = "housing.csv"  # Zamień na rzeczywistą ścieżkę do pliku
 df = pd.read_csv(file_path, sep=',')
@@ -20,37 +21,42 @@ print("\nPodstawowe statystyki:")
 print(df.describe())
 
 
-for column in df.select_dtypes(include=['float64', 'int64']).columns:
-    plt.figure(figsize=(6, 4))
-    sns.histplot(df[column], kde=True, bins=30)
-    plt.title(f"Rozkład wartości - {column}")
-    plt.show()
+# # Wizualizacja rozkładów cech numerycznych
+# for column in df.select_dtypes(include=['float64', 'int64']).columns:
+#     plt.figure(figsize=(6, 4))
+#     sns.histplot(df[column], kde=True, bins=30)
+#     plt.title(f"Rozkład wartości - {column}")
+#     plt.show()
+#
+# # Wizualizacja wykresów pudełkowych
+# for column in df.select_dtypes(include=['float64', 'int64']).columns:
+#     plt.figure(figsize=(6, 4))
+#     sns.boxplot(df[column])
+#     plt.title(f"Wykres pudełkowy - {column}")
+#     plt.show()
 
-for column in df.select_dtypes(include=['float64', 'int64']).columns:
-    plt.figure(figsize=(6, 4))
-    sns.boxplot(df[column])
-    plt.title(f"Wykres pudełkowy - {column}")
-    plt.show()
-
-#One-Hot Encoding
+# One-Hot Encoding
 df_encoded = pd.get_dummies(df, columns=['ocean_proximity'], drop_first=True)
 
+# Tworzenie dodatkowych cech
 df_encoded['rooms_per_household'] = df_encoded['total_rooms'] / df_encoded['households']
 df_encoded['bedrooms_per_room'] = df_encoded['total_bedrooms'] / df_encoded['total_rooms']
 df_encoded['population_per_household'] = df_encoded['population'] / df_encoded['households']
 
-#macierz korelacji
+# Macierz korelacji
 plt.figure(figsize=(10, 6))
 sns.heatmap(df_encoded.corr(), annot=True, cmap='coolwarm')
 plt.title("Macierz korelacji cech")
 plt.show()
 
+# Usuwanie cech o niskiej korelacji z median_house_value
 threshold = 0.3
 correlations = df_encoded.corr()['median_house_value'].abs()
 low_corr_features = correlations[correlations < threshold].index
 print("Cechy o niskiej korelacji z ceną:", list(low_corr_features))
 df_encoded = df_encoded.drop(columns=low_corr_features)
 
+# Przygotowanie danych do modelowania
 X = df_encoded.drop('median_house_value', axis=1)
 y = df_encoded['median_house_value']
 
@@ -58,6 +64,7 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+print(len(X_test))
 
 # Regresja liniowa
 lin_reg = LinearRegression()
@@ -104,22 +111,30 @@ sns.barplot(x=feature_importances, y=feature_importances.index)
 plt.title("Feature Importances - Random Forest")
 plt.show()
 
+# Poprawienie wywołania explainer dla SHAP
+explainer = shap.TreeExplainer(best_rf_model)
+shap_values = explainer.shap_values(X_test)
+
+# Wyświetlenie wykresów SHAP
 plt.figure(figsize=(10, 6))
-plt.scatter(y_test, y_pred_lr, alpha=0.7, label='Regresja Liniowa')
-plt.scatter(y_test, y_pred_rf, alpha=0.7, label='Random Forest')
-plt.plot([y.min(), y.max()], [y.min(), y.max()], 'k--', color='red')
-plt.title("Porownanie przewidywanych i rzeczywistych cen")
-plt.xlabel("Rzeczywiste ceny")
-plt.ylabel("Przewidywane ceny")
-plt.legend()
+shap.summary_plot(shap_values, X, plot_type="bar")
 plt.show()
 
-# Rozkład błędów dla Random Forest
-errors = y_test - y_pred_rf
-plt.figure(figsize=(6, 4))
-sns.histplot(errors, kde=True, bins=30)
-plt.title("Rozkład błędów - Random Forest")
-plt.show()
+# feature_name = 'median_income'
+#
+# plt.figure(figsize=(10, 6))
+# shap.dependence_plot(feature_name, shap_values[0], X_test)  # [0] dla RandomForestRegressor
+# plt.show()
 
-joblib.dump(best_rf_model, 'best_rf_model.pkl')
-print("Model zapisany jako 'best_rf_model.pkl'")
+
+# explainer = shap.TreeExplainer(best_rf_model)
+
+# shap_values = explainer.shap_values(X_test)
+
+
+# print(shap_values.shape)
+
+# feature_name = 'median_income'
+
+# shap.dependence_plot(feature_name, shap_values, X_test)
+# plt.show()
